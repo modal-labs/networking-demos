@@ -20,7 +20,7 @@ import modal
 app = modal.App("quic-nat-traversal")
 
 # Install required packages
-image = modal.Image.debian_slim().pip_install("aioquic", "pynat", "cryptography", "six")
+image = modal.Image.debian_slim().pip_install("aioquic", "cryptography", "six").pip_install("pynat")
 
 # Global constants
 SERVER_LOCAL_PORT = 5555
@@ -74,7 +74,7 @@ def create_socket(local_port: int):
     return sock
 
 
-@app.function(image=image, region=SERVER_REGION)
+@app.function(image=image, region=SERVER_REGION, scaledown_window=5)
 async def run_server(rendezvous: modal.Dict, punch_strings: list[bytes], response_kib: int):
     """
     Server function that:
@@ -93,10 +93,11 @@ async def run_server(rendezvous: modal.Dict, punch_strings: list[bytes], respons
 
     # Continuously register public IP/port with rendezvous, wait for client to do the same.
     client_endpoint = None
+    pub_ip, pub_port = await get_ext_addr(sock)
+    print(f"[SERVER] Public endpoint: {pub_ip}:{pub_port}")
+    await rendezvous.put.aio(key="server", value=(pub_ip, pub_port))
     while not client_endpoint:
-        pub_ip, pub_port = await get_ext_addr(sock)
-        print(f"[SERVER] Public endpoint: {pub_ip}:{pub_port}")
-        await rendezvous.put.aio(key="server", value=(pub_ip, pub_port))
+        
         client_endpoint = await rendezvous.get.aio(key="client")
         if client_endpoint:
             print(f"[SERVER] Got client endpoint: {client_endpoint}")
@@ -111,12 +112,13 @@ async def run_server(rendezvous: modal.Dict, punch_strings: list[bytes], respons
     # Send punch packets to client, while also waiting for a punch packet from the client.
     punch_success = False
     for i in range(50):
-        print(f"[SERVER] sending packet to {client_ip}:{client_port}")
-        sock.sendto(punch_strings[0], (client_ip, client_port))
-
         # Listen for incoming bytes.
         LISTEN_MS = 200
         try:
+
+            print(f"[SERVER] sending packet to {client_ip}:{client_port}")
+            sock.sendto(punch_strings[0], (client_ip, client_port))
+
             data, addr = await asyncio.wait_for(
                 asyncio.get_event_loop().sock_recvfrom(sock, 32), timeout=LISTEN_MS / 1000
             )
@@ -131,6 +133,10 @@ async def run_server(rendezvous: modal.Dict, punch_strings: list[bytes], respons
                 sock.sendto(punch_strings[1], addr)
                 punch_success = True
                 break
+            elif data == punch_strings[1]:
+                print(f"[SERVER] Received punch ack from client at {addr}")
+                punch_success = True
+                break
             else:
                 print(f"[SERVER] Received unexpected data from client: {data} {punch_strings=}")
                 continue
@@ -140,6 +146,7 @@ async def run_server(rendezvous: modal.Dict, punch_strings: list[bytes], respons
 
     if not punch_success:
         print("[SERVER] Failed to punch NAT with client")
+        sock.close()
         return
 
     # Close UDP socket before QUIC can use the port
@@ -236,66 +243,78 @@ async def run_client(request_kib: int, response_kib: int):
     from aioquic.quic.configuration import QuicConfiguration
     from aioquic.quic.logger import QuicLogger
 
-    sock = create_socket(CLIENT_LOCAL_PORT)
+    try:
+        sock = create_socket(CLIENT_LOCAL_PORT)
 
-    # Create random string for punch and ack packets.
-    punch_strings = [os.urandom(16) for _ in range(3)]
+        # Create random string for punch and ack packets.
+        punch_strings = [os.urandom(16) for _ in range(3)]
 
-    with modal.Dict.ephemeral() as rendezvous:
-        # Create a server.
-        run_server.spawn(rendezvous, punch_strings, response_kib)
+        with modal.Dict.ephemeral() as rendezvous:
+            # Create a server.
+            run_server.spawn(rendezvous, punch_strings, response_kib)
 
-        # Continuously register public IP/port with rendezvous, wait for server to do the same.
-        server_endpoint = None
-        while not server_endpoint:
+            # Continuously register public IP/port with rendezvous, wait for server to do the same.
+            server_endpoint = None
             pub_ip, pub_port = await get_ext_addr(sock)
             print(f"[CLIENT] Public endpoint: {pub_ip}:{pub_port}")
             await rendezvous.put.aio(key="client", value=(pub_ip, pub_port))
-            server_endpoint = await rendezvous.get.aio(key="server")
-            if server_endpoint:
-                print(f"[CLIENT] Got server endpoint: {server_endpoint}")
-                break
-            print("[CLIENT] Waiting for server to register...")
-            await asyncio.sleep(0.1)
+            while not server_endpoint:
+                server_endpoint = await rendezvous.get.aio(key="server")
+                if server_endpoint:
+                    print(f"[CLIENT] Got server endpoint: {server_endpoint}")
+                    break
+                print("[CLIENT] Waiting for server to register...")
+                await asyncio.sleep(0.1)
 
-    server_ip, server_port = server_endpoint
+        server_ip, server_port = server_endpoint
+        print(f"[CLIENT] Starting to punch to server at {server_ip}:{server_port}")
+        # Send punch packets to server, while also waiting for a punch packet from the server.
+        punch_success = False
+        for i in range(50):
+            
+            # wait for the server to start pinging us (the client)
+            if i == 0:
+                await asyncio.sleep(2.0)
 
-    print(f"[CLIENT] Starting to punch to server at {server_ip}:{server_port}")
+            # Listen for incoming bytes.
+            LISTEN_MS = 200
+            try:
 
-    # Send punch packets to server, while also waiting for a punch packet from the server.
-    punch_success = False
-    for i in range(50):
-        print(f"[CLIENT] sending packet to {server_ip}:{server_port}")
-        sock.sendto(punch_strings[0], (server_ip, server_port))
+                print(f"[CLIENT] sending packet to {server_ip}:{server_port}")
+                sock.sendto(punch_strings[0], (server_ip, server_port))
 
-        # Listen for incoming bytes.
-        LISTEN_MS = 200
-        try:
-            data, addr = await asyncio.wait_for(
-                asyncio.get_event_loop().sock_recvfrom(sock, 32), timeout=LISTEN_MS / 1000
-            )
-            print(f"[CLIENT] Received data from {addr}")
+                data, addr = await asyncio.wait_for(
+                    asyncio.get_event_loop().sock_recvfrom(sock, 32), timeout=LISTEN_MS / 1000
+                )
+                print(f"[CLIENT] Received data from {addr}")
 
-            if addr[0] != server_ip or addr[1] != server_port:
-                print(f"[CLIENT] Server is using different port! STUN: {server_port}, Actual: {addr[1]}")
-                server_ip, server_port = addr
+                if addr[0] != server_ip or addr[1] != server_port:
+                    print(f"[CLIENT] Server is using different port! STUN: {server_port}, Actual: {addr[1]}")
+                    server_ip, server_port = addr
 
-            if data == punch_strings[0]:
-                print(f"[CLIENT] Received punch from server at {addr}")
+                if data == punch_strings[0]:
+                    print(f"[CLIENT] Received punch from server at {addr}")
+                    sock.sendto(punch_strings[1], addr)
+                    punch_success = True
+                    break
+                elif data == punch_strings[1]:
+                    print(f"[CLIENT] Received punch ack from server at {addr}")
+                    punch_success = True
+                    break
+                else:
+                    print(f"[CLIENT] Received unexpected data from server: {data} {punch_strings=}")
+
+            except (asyncio.TimeoutError, BlockingIOError):
+                print(f"[CLIENT] No response received after {LISTEN_MS}ms.")
                 continue
-            elif data == punch_strings[1]:
-                print(f"[CLIENT] Received punch ack from server at {addr}")
-                punch_success = True
-                break
-            else:
-                print(f"[CLIENT] Received unexpected data from server: {data} {punch_strings=}")
-
-        except (asyncio.TimeoutError, BlockingIOError):
-            print(f"[CLIENT] No response received after {LISTEN_MS}ms.")
-            continue
+    except Exception as e:
+        print(f"[CLIENT] Error: {e}")
+        sock.close()
+        return
 
     if not punch_success:
         print("[CLIENT] Failed to punch NAT with server")
+        sock.close()
         return
 
     # Close UDP socket before QUIC can use the port
