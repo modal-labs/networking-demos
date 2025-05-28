@@ -34,7 +34,8 @@ async def run_server(rendezvous: modal.Dict, response_kib: int):
     # Create response data once
     response_data = b"x" * (response_kib * 1024)
     for _ in range(N_ITERATIONS):
-        await portal.recv()
+        msg = await portal.recv()
+        print(f"[SERVER] Received message: {len(msg)} bytes")
         await portal.send(response_data)
 
     await asyncio.sleep(1)
