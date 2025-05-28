@@ -19,8 +19,8 @@ app = modal.App("quic-portal-modal-demo")
 
 image = modal.Image.debian_slim().pip_install("quic-portal")
 
-SERVER_REGION = "us-west-1"
-CLIENT_REGION = "us-sanjose-1"
+SERVER_REGION = "us-sanjose-1"
+CLIENT_REGION = "us-west-1"
 
 N_ITERATIONS = 25
 
@@ -106,6 +106,12 @@ async def run_client(request_kib: int, response_kib: int):
 @app.local_entrypoint()
 def main(local: bool = False, request_kib: int = 1, response_kib: int = 1):
     if local:
+        try:
+            import quic_portal
+        except ImportError:
+            print("quic-portal is not installed. Please install it with `pip install quic-portal`")
+            return
+
         run_client.local(request_kib=request_kib, response_kib=response_kib)
     else:
         run_client.remote(request_kib=request_kib, response_kib=response_kib)
