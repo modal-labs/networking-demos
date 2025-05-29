@@ -18,7 +18,7 @@ app = modal.App("openpi-example")
 
 openpi_image = (
     modal.Image.from_registry("nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04", add_python="3.11")
-    .apt_install("git", "git-lfs", "wget")
+    .apt_install("git")
     .run_commands("git clone --recurse-submodules https://github.com/Physical-Intelligence/openpi.git /root/openpi")
     .pip_install("uv")
     .run_commands(
