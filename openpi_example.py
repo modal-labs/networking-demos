@@ -52,9 +52,12 @@ def server(rendezvous: modal.Dict):
         def serve_forever(self):
             while True:
                 obs = msgpack_numpy.unpackb(self._portal.recv())
+
                 t0 = time.time()
                 action = self._policy.infer(obs)
-                print(f"[server] (no network) inference time: {time.time() - t0:.2f}s.")
+                elapsed = time.time() - t0
+                print(f"[server] (no network) inference time: {elapsed * 1000:.2f}ms.")
+
                 self._portal.send(self._packer.pack(action))
 
     t0 = time.time()
@@ -125,7 +128,10 @@ def client():
     n_steps = 100
     start = time.time()
     for _ in range(n_steps):
+        t0 = time.time()
         policy.infer(_random_observation_aloha())
+        elapsed = time.time() - t0
+        print(f"[client] (+network) inference time: {elapsed * 1000:.2f}ms.")
     end = time.time()
 
     print(f"Total time taken: {end - start:.2f} s")
