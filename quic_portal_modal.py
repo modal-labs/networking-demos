@@ -9,7 +9,6 @@ Between local client and container: `modal run quic_portal_modal.py --local`
 Larger workload: `modal run quic_portal_modal.py --request-kib=600 --response-kib=5`
 """
 
-import asyncio
 import os
 import time
 
@@ -17,7 +16,7 @@ import modal
 
 app = modal.App("quic-portal-modal-demo")
 
-image = modal.Image.debian_slim().pip_install("quic-portal")
+image = modal.Image.debian_slim().pip_install("quic-portal==0.1.1")
 
 SERVER_REGION = "us-sanjose-1"
 CLIENT_REGION = "us-west-1"
@@ -26,28 +25,28 @@ N_ITERATIONS = 25
 
 
 @app.function(image=image, region=SERVER_REGION)
-async def run_server(rendezvous: modal.Dict, response_kib: int):
+def run_server(rendezvous: modal.Dict, response_kib: int):
     from quic_portal import Portal
 
-    portal = await Portal.create_server(rendezvous)
+    portal = Portal.create_server(rendezvous)
 
     # Create response data once
     response_data = b"x" * (response_kib * 1024)
     for _ in range(N_ITERATIONS):
-        msg = await portal.recv()
+        msg = portal.recv()
         print(f"[SERVER] Received message: {len(msg)} bytes")
-        await portal.send(response_data)
+        portal.send(response_data)
 
-    await asyncio.sleep(1)
+    time.sleep(1)
 
 
 @app.function(image=image, region=CLIENT_REGION)
-async def run_client(request_kib: int, response_kib: int):
+def run_client(request_kib: int, response_kib: int):
     from quic_portal import Portal
 
-    async with modal.Dict.ephemeral.aio() as rendezvous:
+    with modal.Dict.ephemeral() as rendezvous:
         run_server.spawn(rendezvous, response_kib)
-        portal = await Portal.create_client(rendezvous)
+        portal = Portal.create_client(rendezvous)
 
         # Create request data once
         request_data = b"x" * (request_kib * 1024)
@@ -61,8 +60,8 @@ async def run_client(request_kib: int, response_kib: int):
         for i in range(N_ITERATIONS):
             start_time = time.monotonic()
 
-            await portal.send(request_data)
-            response = await portal.recv()
+            portal.send(request_data)
+            response = portal.recv()
 
             end_time = time.monotonic()
             latency = (end_time - start_time) * 1000  # Convert to ms
@@ -75,7 +74,7 @@ async def run_client(request_kib: int, response_kib: int):
                 print(f"[CLIENT] Warning: Response size mismatch: {len(response)} vs {len(expected_response)}")
 
             # Small pause between iterations
-            await asyncio.sleep(0.1)
+            time.sleep(0.1)
 
         # Calculate and print statistics
         if latencies:
