@@ -74,7 +74,7 @@ def create_socket(local_port: int):
     return sock
 
 
-@app.function(image=image, region=SERVER_REGION, scaledown_window=5)
+@app.function(image=image, region=SERVER_REGION)
 async def run_server(rendezvous: modal.Dict, punch_strings: list[bytes], response_kib: int):
     """
     Server function that:
