@@ -16,12 +16,12 @@ import modal
 
 app = modal.App("quic-portal-modal-demo")
 
-image = modal.Image.debian_slim().pip_install("six").run_commands("pip install --no-build-isolation quic-portal==0.1.2")
+image = modal.Image.debian_slim().pip_install("quic-portal==0.1.6")
 
 SERVER_REGION = "us-sanjose-1"
 CLIENT_REGION = "us-west-1"
 
-N_ITERATIONS = 25
+N_ITERATIONS = 50
 
 
 @app.function(image=image, region=SERVER_REGION)
@@ -85,8 +85,8 @@ def run_client(request_kib: int, response_kib: int):
 
             avg_latency = sum(latencies) / num_latencies
             p50_latency = latencies[num_latencies // 2]
+            p75_latency = latencies[int(num_latencies * 0.75)]
             p90_latency = latencies[int(num_latencies * 0.9)]
-            p99_latency = latencies[int(num_latencies * 0.99)]
             min_latency = latencies[0]
             max_latency = latencies[-1]
 
@@ -95,8 +95,8 @@ def run_client(request_kib: int, response_kib: int):
             print(f"Request size: {request_kib}KB, Response size: {response_kib}KB")
             print(f"Average latency: {avg_latency:.2f}ms")
             print(f"Median latency (p50): {p50_latency:.2f}ms")
+            print(f"75th percentile (p75): {p75_latency:.2f}ms")
             print(f"90th percentile (p90): {p90_latency:.2f}ms")
-            print(f"99th percentile (p99): {p99_latency:.2f}ms")
             print(f"Min latency: {min_latency:.2f}ms")
             print(f"Max latency: {max_latency:.2f}ms")
             print("==================================\n")

@@ -1,5 +1,13 @@
 """
 Uses `quic-portal` to demonstrate inference.
+
+Requires Modal setup:
+- Create Modal account at modal.com
+- Install modal: `pip install modal`
+- `modal setup` or `python -m modal setup`
+
+For testing:
+- Install quic-portal library: `pip install quic-portal==0.1.6`
 """
 
 import time
@@ -18,8 +26,7 @@ openpi_image = (
     )
     .run_commands("cd /root && unset UV_INDEX_URL && GIT_LFS_SKIP_SMUDGE=1 uv pip install --system -e openpi")
     .run_commands("cd /root && unset UV_INDEX_URL && GIT_LFS_SKIP_SMUDGE=1 uv pip install --system modal")
-    .pip_install("fastapi", "aioquic", "aiohttp", "cryptography", "six")
-    .run_commands("pip install --no-build-isolation quic-portal==0.1.2")
+    .run_commands("cd /root && unset UV_INDEX_URL && GIT_LFS_SKIP_SMUDGE=1 uv pip install --system quic-portal==0.1.6")
 )
 
 volume = modal.Volume.from_name("openpi-cache", create_if_missing=True)
