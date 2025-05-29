@@ -16,7 +16,7 @@ import modal
 
 app = modal.App("quic-portal-modal-demo")
 
-image = modal.Image.debian_slim().pip_install("quic-portal==0.1.2")
+image = modal.Image.debian_slim().pip_install("six").run_commands("pip install --no-build-isolation quic-portal==0.1.2")
 
 SERVER_REGION = "us-sanjose-1"
 CLIENT_REGION = "us-west-1"
