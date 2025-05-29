@@ -3,10 +3,23 @@ Benchmark custom `quic-portal` library.
 
 After UDP hole punching, `quic-portal` uses a Python wrappers around `quinn` to create an abstract data transport layer.
 
-Between two containers: `modal run quic_portal_modal.py`
-Between local client and container: `modal run quic_portal_modal.py --local`
+Requires Modal setup:
+- Create Modal account at modal.com
+- Install modal: `pip install modal`
+- `modal setup` or `python -m modal setup`
 
-Larger workload: `modal run quic_portal_modal.py --request-kib=600 --response-kib=5`
+Before testing:
+- Create a new virtual environment:
+    - `python -m venv .venv && source .venv/bin/activate`
+- Install modal:
+    - `pip install modal`
+- Install quic-portal library:
+    - `pip install quic-portal==0.1.6`
+
+Testing:
+- Between two containers: `modal run quic_portal_modal.py`
+- Between local client and container: `modal run quic_portal_modal.py --local`
+- Larger workload: `modal run quic_portal_modal.py --request-kib=600 --response-kib=5 --local`
 """
 
 import os

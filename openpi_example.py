@@ -6,8 +6,20 @@ Requires Modal setup:
 - Install modal: `pip install modal`
 - `modal setup` or `python -m modal setup`
 
-For testing:
-- Install quic-portal library: `pip install quic-portal==0.1.6`
+Before testing:
+- Create a new virtual environment:
+    - `python -m venv .venv && source .venv/bin/activate`
+- Install modal:
+    - `pip install modal`
+- Install quic-portal library:
+    - `pip install quic-portal==0.1.6`
+- Install openpi library:
+    - `git clone https://github.com/Physical-Intelligence/openpi.git`
+    - `pip install -e openpi/packages/openpi_client`
+
+Testing:
+- Between two containers: `modal run openpi_example.py`
+- From local machine: `modal run openpi_example.py --local`
 """
 
 import time

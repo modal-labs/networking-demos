@@ -1,3 +1,6 @@
 # Virtual environment
 .venv
 **/__pycache__/**
+
+# Cloned repo for installation
+openpi/
