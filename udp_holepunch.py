@@ -122,14 +122,12 @@ class HolePunchingClient:
 
     def register_with_modal_dict(self, rendezvous, peer_id: str):
         """Register with modal.Dict and wait for peer info."""
-        # Register self
         my_info = {
             "client_id": self.client_id,
             "endpoint_infos": self.endpoint_infos,  # List of dicts
         }
         print(f"[Client {self.client_id}] Registering with rendezvous...")
         rendezvous[self.client_id] = my_info
-        # Wait for peer info
         print(f"[Client {self.client_id}] Waiting for peer {peer_id} to register...")
         while peer_id not in rendezvous:
             time.sleep(0.2)
@@ -137,7 +135,7 @@ class HolePunchingClient:
         print(f"[Client {self.client_id}] Got peer info: {peer_info}")
         return peer_info
 
-    def punch_holes_and_communicate(self, peer_info, auth_token: bytes, rendezvous=None, loop=None):
+    async def punch_holes_and_communicate(self, peer_info, auth_token: bytes, rendezvous=None):
         """Attempt to send UDP packets to all peer's public and private endpoints."""
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(("0.0.0.0", self.local_port))
@@ -186,7 +184,7 @@ class HolePunchingClient:
                     pass
                 except Exception as e:
                     print(f"[Client {self.client_id}] recvfrom error: {e}")
-                time.sleep(0.5)
+                await asyncio.sleep(0.5)
             except Exception as e:
                 print(f"[Client {self.client_id}] Error in attempt {attempt + 1}: {e}")
                 continue
@@ -195,11 +193,8 @@ class HolePunchingClient:
         if working_endpoint:
             print(f"[Client {self.client_id}] Successfully established connection with peer at {working_endpoint}")
             # Save our success endpoint to the rendezvous dict if provided
-            if rendezvous is not None and loop is not None:
-                fut = asyncio.run_coroutine_threadsafe(
-                    rendezvous.put.aio(f"success_endpoint_{self.client_id}", working_endpoint), loop
-                )
-                fut.result()
+            if rendezvous is not None:
+                await rendezvous.put.aio(f"success_endpoint_{self.client_id}", working_endpoint)
             self.sock.close()
             self.sock = None
         else:
@@ -207,11 +202,6 @@ class HolePunchingClient:
             self.sock.close()
             self.sock = None
         return working_endpoint
-
-    def listen_for_peer(self):
-        """Listen for incoming UDP packets from peer."""
-        # TODO: Handle incoming packets, authenticate, and respond
-        pass
 
     def test_hairpin_nat(self, public_ip, public_port):
         """Test if hairpin translation is supported by sending a UDP packet to our own public endpoint."""
@@ -314,7 +304,7 @@ async def quic_client(server_ip, server_port, local_port, request_kib, n_iterati
         max_datagram_size=1400,
     )
     ping_data = b"P" * request_kib * 1024
-    latencies = []
+    results = {"received": 0, "latencies": [], "bytes_received": []}
     async with connect(
         server_ip,
         server_port,
@@ -333,16 +323,17 @@ async def quic_client(server_ip, server_port, local_port, request_kib, n_iterati
             resp_length = int.from_bytes(length_bytes, "big")
             response = await reader.read(resp_length)
             end = time_mod.monotonic()
-            latencies.append((end - start) * 1000)
+            results["latencies"].append((end - start) * 1000)
+            results["received"] += 1
+            results["bytes_received"].append(resp_length)
             await asyncio.sleep(0.05)
         writer.close()
-    return latencies
+    return results
 
 def get_region():
     return os.environ.get('MODAL_REGION', 'local')
 
-@app.function(image=image, max_inputs=1, region='us-phoenix-1')
-async def run_registration(rendezvous: modal.Dict, client_id: str, peer_id: str, local_port: int, run_quic: bool = True, request_kib: int = 1, response_kib: int = 1, n_iterations: int = 100):
+async def run_hole_punch_peer(rendezvous, client_id, peer_id, local_port):
     import socket
     import os
     import platform
@@ -362,73 +353,54 @@ async def run_registration(rendezvous: modal.Dict, client_id: str, peer_id: str,
         stun_port=STUN_SERVERS[0][1],
     )
     client.endpoint_infos = endpoint_infos
-    # Register self
     my_info = {
         "client_id": client.client_id,
         "endpoint_infos": client.endpoint_infos,  # List of dicts
         "region": get_region(),
     }
     print(f"[Client {client.client_id}] Registering with rendezvous...")
-    await rendezvous.put.aio(client.client_id, my_info)
-    # Wait for peer info
+    rendezvous[client.client_id] = my_info
     print(f"[Client {client.client_id}] Waiting for peer {peer_id} to register...")
-    while True:
-        peer_info = await rendezvous.get.aio(peer_id)
-        if peer_info:
-            print(f"[Client {client.client_id}] Got peer info: {peer_info}")
-            print(f"[Client {client_id}] Peer info received at: {time.time()}")
-            break
-        await asyncio.sleep(0.1)
-    # Also fetch our own info from the rendezvous dict (to ensure both are present)
-    my_info_fetched = await rendezvous.get.aio(client_id)
+    while peer_id not in rendezvous:
+        await asyncio.sleep(0.2)  # Modern async polling
+    peer_info = rendezvous[peer_id]
+    print(f"[Client {client.client_id}] Got peer info: {peer_info}")
     # Create a shared auth token through the rendezvous server
     if client_id < peer_id:  # Only one client should generate the token
         auth_token = os.urandom(16)
         print(f"[Client {client_id}] Generated auth_token: {auth_token.hex()} at {time.time()}")
-        await rendezvous.put.aio("auth_token", auth_token)
-    # Wait for auth token
-    while True:
-        auth_token = await rendezvous.get.aio("auth_token")
-        if auth_token:
-            print(f"[Client {client_id}] Using auth_token: {auth_token.hex()} at {time.time()}")
-            break
-        await asyncio.sleep(0.1)
+        rendezvous["auth_token"] = auth_token
+    while "auth_token" not in rendezvous:
+        await asyncio.sleep(0.1)  # Modern async polling
+    auth_token = rendezvous["auth_token"]
+    print(f"[Client {client_id}] Using auth_token: {auth_token.hex()} at {time.time()}")
     # Staggered start for punching
     punch_start_time = time.time()
     if client_id < peer_id:
         print(f"[Client {client_id}] Staggering start: waiting 1.5s before punching at {punch_start_time}")
-        time.sleep(1.5)
+        await asyncio.sleep(1.5)
     else:
         print(f"[Client {client_id}] Staggering start: waiting 0.5s before punching at {punch_start_time}")
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
     print(f"[Client {client_id}] Starting punch_holes_and_communicate at {time.time()}")
-    # Start hole punching
-    main_loop = asyncio.get_event_loop()
-    working_endpoint = await main_loop.run_in_executor(
-        None, client.punch_holes_and_communicate, peer_info, auth_token, rendezvous, main_loop
-    )
-    # Fetch both endpoints
-    async def wait_for_key(rendezvous, key, timeout=5.0):
-        start = time_mod.time()
-        while True:
-            value = await rendezvous.get.aio(key)
-            if value is not None:
-                return value
-            if time_mod.time() - start > timeout:
-                return None
-            await asyncio.sleep(0.05)
-    success_endpoint_a = await wait_for_key(rendezvous, "success_endpoint_A")
-    success_endpoint_b = await wait_for_key(rendezvous, "success_endpoint_B")
-    # If run_quic is True and this is client A, run server; if B, run client
+    working_endpoint = await client.punch_holes_and_communicate(peer_info, auth_token, rendezvous)
+    return {
+        "registration": {
+            "self": my_info,
+            "peer": peer_info,
+        },
+        "working_endpoint": working_endpoint,
+        "endpoint_infos": endpoint_infos,
+    }
+
+async def run_quic_test(client_id, peer_info, working_endpoint, local_port, request_kib, response_kib, n_iterations):
     quic_results = None
-    if run_quic and working_endpoint:
+    if working_endpoint:
         if client_id == "A":
             print(f"[Client {client_id}] Running QUIC server on port {local_port}")
             quic_results = await quic_server(local_port, response_kib, n_iterations)
         elif client_id == "B":
-            # Wait a bit for server to be ready
-            await asyncio.sleep(1.0)
-            # Find A's public endpoint (from peer_info)
+            await asyncio.sleep(1.0)  # Modern async sleep
             a_public = None
             for ep in peer_info["endpoint_infos"]:
                 if ep["public_ip"] != "0.0.0.0":
@@ -436,17 +408,24 @@ async def run_registration(rendezvous: modal.Dict, client_id: str, peer_id: str,
                     break
             if a_public:
                 print(f"[Client {client_id}] Running QUIC client to {a_public} from port {local_port}")
-                latencies = await quic_client(a_public[0], a_public[1], local_port, request_kib, n_iterations)
-                quic_results = {"latencies": latencies}
+                quic_results = await quic_client(a_public[0], a_public[1], local_port, request_kib, n_iterations)
             else:
                 print(f"[Client {client_id}] Could not find A's public endpoint for QUIC test")
+    return quic_results
+
+region = os.environ.get('FORCE_MODAL_REGION', None)
+@app.function(image=image, max_inputs=1, region=region)
+async def run_quic_peer(rendezvous: modal.Dict, client_id: str, peer_id: str, local_port: int, run_quic: bool = True, request_kib: int = 1, response_kib: int = 1, n_iterations: int = 100):
+    # Run hole punching
+    hole_punch_result = await run_hole_punch_peer(rendezvous, client_id, peer_id, local_port)
+    working_endpoint = hole_punch_result["working_endpoint"]
+    peer_info = hole_punch_result["registration"]["peer"]
+    # Run QUIC test if requested and successful
+    quic_results = None
+    if run_quic and working_endpoint:
+        quic_results = await run_quic_test(client_id, peer_info, working_endpoint, local_port, request_kib, response_kib, n_iterations)
     result = {
-        "registration": {
-            "self": my_info_fetched,
-            "peer": peer_info,
-        },
-        "success_endpoint_a": success_endpoint_a,
-        "success_endpoint_b": success_endpoint_b,
+        **hole_punch_result,
         "quic_results": quic_results,
     }
     return result
@@ -463,69 +442,16 @@ async def local_main(client_id: str = "A", peer_id: str = "B", local_port: int =
     print(f"[Entrypoint] Using randomized local_port={local_port}")
     async with modal.Dict.ephemeral() as rendezvous:
         # Spawn the peer registration
-        await run_registration.spawn.aio(rendezvous, client_id, peer_id, local_port + 1)
+        await run_quic_peer.spawn.aio(rendezvous, client_id, peer_id, local_port + 1)
         # Run our registration
         if not local:
-            peer_info = await run_registration.remote.aio(rendezvous, peer_id, client_id, local_port)
+            peer_info = await run_quic_peer.remote.aio(rendezvous, peer_id, client_id, local_port)
         else:
-            peer_info = await run_registration.local(rendezvous, peer_id, client_id, local_port)
+            peer_info = await run_quic_peer.local(rendezvous, peer_id, client_id, local_port)
         print(f"[Local Entrypoint] Peer info: {peer_info}")
         if output_path:
             with open(output_path, "w") as f:
                 json.dump(peer_info, f)
         return peer_info
 
-async def run_once(local, port):
-    return await local_main(client_id="A", peer_id="B", local_port=port, local=local)
 
-def run_hole_punching_test(num_runs: int = 5, local: bool = False):
-    """Run the hole punching demo num_runs times, collect diagnostics, and print a summary."""
-    results = []
-    for i in range(num_runs):
-        print(f"\n=== Test Run {i+1}/{num_runs} (local={local}) ===")
-        port = random.randint(10000, 60000)
-        try:
-            import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-                # If we're already in an event loop, use create_task and await
-                result = loop.run_until_complete(run_once(local, port))
-            except RuntimeError:
-                # No event loop, safe to use asyncio.run
-                result = asyncio.run(run_once(local, port))
-            # Determine success
-            success = result and result.get("success_endpoint_a") is not None and result.get("success_endpoint_b") is not None
-            nat_type = result.get("nat_type") if result else None
-            results.append({
-                "run": i+1,
-                "success": success,
-                "nat_type": nat_type,
-                "result": result,
-            })
-            print(f"[Test Run {i+1}] SUCCESS: {success}, NAT type: {nat_type}")
-        except Exception as e:
-            print(f"[Test Run {i+1}] ERROR: {e}")
-            results.append({
-                "run": i+1,
-                "success": False,
-                "error": str(e),
-            })
-    # Print summary
-    num_success = sum(1 for r in results if r["success"])
-    print(f"\n=== Hole Punching Test Summary (local={local}) ===")
-    print(f"Total runs: {num_runs}")
-    print(f"Successes: {num_success}")
-    print(f"Failures: {num_runs - num_success}")
-    print("Details:")
-    print(json.dumps(results, indent=2))
-    return results
-
-# Optionally, add a CLI entrypoint for the test
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="UDP Hole Punching Single Test Runner")
-    parser.add_argument("--local", action="store_true", help="Test local-to-remote (default: remote-to-remote)")
-    parser.add_argument("--output", type=str, help="Path to write JSON result")
-    args = parser.parse_args()
-    port = random.randint(10000, 60000)
-    asyncio.run(local_main(client_id="A", peer_id="B", local_port=port, local=args.local, output_path=args.output)) 
