@@ -41,31 +41,6 @@ class ClientInfo:
         self.private_ep = private_ep
         self.public_ep = public_ep
 
-# --- Server S ---
-class RendezvousServer:
-    def __init__(self, listen_port: int):
-        self.listen_port = listen_port
-        self.clients: Dict[str, ClientInfo] = {}  # client_id -> ClientInfo
-        # TODO: Add thread-safe access if needed
-
-    def start(self):
-        """Start the UDP server to handle client registrations and connection requests."""
-        # TODO: Listen for registration and connection request messages
-        # - On registration: record private and public endpoint
-        # - On connection request: send peer's endpoints to both clients
-        pass
-
-    def handle_registration(self, data, addr):
-        """Handle a registration message from a client."""
-        # TODO: Parse client_id, private endpoint from data
-        # Record public endpoint as addr
-        pass
-
-    def handle_connection_request(self, data, addr):
-        """Handle a request from client A to connect to client B."""
-        # TODO: Look up both clients, send each other's endpoints
-        pass
-
 # --- Client (A or B) ---
 class HolePunchingClient:
     def __init__(self, client_id: str, server_addr: Tuple[str, int], local_port: int, stun_host: str = "stun.l.google.com", stun_port: int = 19302):
