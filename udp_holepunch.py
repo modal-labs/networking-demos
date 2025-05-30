@@ -273,7 +273,7 @@ STUN_SERVERS = [
 app = modal.App("udp-hole-punching-clean")
 image = modal.Image.debian_slim().pip_install("aioquic", "cryptography", "six").pip_install("pynat")
 
-async def quic_server(local_port, response_kib, n_iterations=10):
+async def quic_server(local_port, response_kib, n_iterations=100):
     cfg = QuicConfiguration(
         is_client=False,
         alpn_protocols=["hq-29"],
@@ -299,7 +299,7 @@ async def quic_server(local_port, response_kib, n_iterations=10):
         .sign(cfg.private_key, hashes.SHA256())
     )
     results = {"received": 0, "latencies": []}
-    pong_data = b"P" * response_kib * 1024
+    pong_data = b"P" * response_kib * 1024 * 100
     async def handle_benchmark(reader, writer):
         for _ in range(n_iterations):
             length_bytes = await reader.read(4)
@@ -366,8 +366,8 @@ async def quic_client(server_ip, server_port, local_port, request_kib, n_iterati
 def get_region():
     return os.environ.get('MODAL_REGION', 'local')
 
-@app.function(image=image, max_inputs=1)
-async def run_registration(rendezvous: modal.Dict, client_id: str, peer_id: str, local_port: int, run_quic: bool = True, request_kib: int = 1, response_kib: int = 1, n_iterations: int = 10):
+@app.function(image=image, max_inputs=1, region='us-phoenix-1')
+async def run_registration(rendezvous: modal.Dict, client_id: str, peer_id: str, local_port: int, run_quic: bool = True, request_kib: int = 1, response_kib: int = 1, n_iterations: int = 100):
     import socket
     import os
     import platform
