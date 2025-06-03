@@ -14,7 +14,7 @@ Before testing:
 - Install modal:
     - `pip install modal`
 - Install quic-portal library:
-    - `pip install quic-portal==0.1.6`
+    - `pip install quic-portal==0.1.7`
 
 Testing:
 - Between two containers: `modal run quic_portal_modal.py`
@@ -29,9 +29,9 @@ import modal
 
 app = modal.App("quic-portal-modal-demo")
 
-image = modal.Image.debian_slim().pip_install("quic-portal==0.1.6")
+image = modal.Image.debian_slim().pip_install("quic-portal==0.1.7")
 
-SERVER_REGION = "us-sanjose-1"
+SERVER_REGION = "us-west-2"
 CLIENT_REGION = "us-west-1"
 
 N_ITERATIONS = 50

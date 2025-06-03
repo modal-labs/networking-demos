@@ -2,7 +2,7 @@ import modal
 
 app = modal.App("quic-portal-debugging")
 
-image = modal.Image.debian_slim().pip_install("quic-portal==0.1.6")
+image = modal.Image.debian_slim().pip_install("quic-portal==0.1.7")
 
 
 @app.function(image=image, region="us-sanjose-1")

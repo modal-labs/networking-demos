@@ -12,7 +12,7 @@ Before testing:
 - Install modal:
     - `pip install modal`
 - Install quic-portal library:
-    - `pip install quic-portal==0.1.6`
+    - `pip install quic-portal==0.1.7`
 - Install openpi library:
     - `git clone https://github.com/Physical-Intelligence/openpi.git`
     - `pip install -e openpi/packages/openpi_client`
@@ -38,7 +38,7 @@ openpi_image = (
     )
     .run_commands("cd /root && unset UV_INDEX_URL && GIT_LFS_SKIP_SMUDGE=1 uv pip install --system -e openpi")
     .run_commands("cd /root && unset UV_INDEX_URL && GIT_LFS_SKIP_SMUDGE=1 uv pip install --system modal")
-    .run_commands("cd /root && unset UV_INDEX_URL && GIT_LFS_SKIP_SMUDGE=1 uv pip install --system quic-portal==0.1.6")
+    .run_commands("cd /root && unset UV_INDEX_URL && GIT_LFS_SKIP_SMUDGE=1 uv pip install --system quic-portal==0.1.7")
 )
 
 volume = modal.Volume.from_name("openpi-cache", create_if_missing=True)
@@ -46,16 +46,20 @@ volume = modal.Volume.from_name("openpi-cache", create_if_missing=True)
 
 @app.function(
     image=openpi_image,
-    region="us-sanjose-1",
+    region="us-west-1",
     timeout=3600,
-    gpu="a100",
+    gpu="h100",
     volumes={"/root/.cache/openpi": volume},
 )
 def server(rendezvous: modal.Dict):
+    import os
+
     from openpi.policies import policy_config as _policy_config
     from openpi.training import config as _config
     from openpi_client import msgpack_numpy
     from quic_portal import Portal
+
+    print(f"[server] in {os.getenv('MODAL_REGION')}")
 
     class ModalPolicyServer:
         def __init__(self, policy, portal: Portal) -> None:
@@ -98,7 +102,7 @@ def server(rendezvous: modal.Dict):
     server.serve_forever()
 
 
-@app.function(image=openpi_image, region="us-west-1")
+@app.function(image=openpi_image, region="us-sanjose-1", timeout=3600)
 def client():
     from typing import Dict
 
@@ -144,17 +148,23 @@ def client():
     policy = ModalClientPolicy(portal)
     policy.infer(_random_observation_aloha())
 
-    n_steps = 100
+    n_steps = 1000
+    client_times = []
     start = time.time()
     for _ in range(n_steps):
         t0 = time.time()
         policy.infer(_random_observation_aloha())
         elapsed = time.time() - t0
+        client_times.append(elapsed)
         print(f"[client] (+network) inference time: {elapsed * 1000:.2f}ms.")
     end = time.time()
 
     print(f"Total time taken: {end - start:.2f} s")
     print(f"Average inference time: {1000 * (end - start) / n_steps:.2f} ms")
+    print(f"p50 inference time: {np.percentile(client_times, 90) * 1000:.2f} ms")
+    print(f"p90 inference time: {np.percentile(client_times, 90) * 1000:.2f} ms")
+    print(f"p95 inference time: {np.percentile(client_times, 90) * 1000:.2f} ms")
+    print(f"p99 inference time: {np.percentile(client_times, 99) * 1000:.2f} ms")
 
     # Shut down the server.
     server_handle.cancel()
