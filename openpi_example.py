@@ -12,10 +12,10 @@ Before testing:
 - Install modal:
     - `pip install modal`
 - Install quic-portal library:
-    - `pip install quic-portal==0.1.7`
+    - `pip install quic-portal==0.1.8`
 - Install openpi library:
     - `git clone https://github.com/Physical-Intelligence/openpi.git`
-    - `pip install -e openpi/packages/openpi_client`
+    - `pip install -e openpi/packages/openpi-client`
 
 Testing:
 - Between two containers: `modal run openpi_example.py`
@@ -30,7 +30,7 @@ app = modal.App("openpi-example")
 
 openpi_image = (
     modal.Image.from_registry("nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04", add_python="3.11")
-    .apt_install("git")
+    .apt_install("git", "git-lfs", "linux-libc-dev", "build-essential", "clang")
     .run_commands("git clone --recurse-submodules https://github.com/Physical-Intelligence/openpi.git /root/openpi")
     .pip_install("uv")
     .run_commands(
@@ -38,7 +38,7 @@ openpi_image = (
     )
     .run_commands("cd /root && unset UV_INDEX_URL && GIT_LFS_SKIP_SMUDGE=1 uv pip install --system -e openpi")
     .run_commands("cd /root && unset UV_INDEX_URL && GIT_LFS_SKIP_SMUDGE=1 uv pip install --system modal")
-    .run_commands("cd /root && unset UV_INDEX_URL && GIT_LFS_SKIP_SMUDGE=1 uv pip install --system quic-portal==0.1.7")
+    .run_commands("cd /root && unset UV_INDEX_URL && GIT_LFS_SKIP_SMUDGE=1 uv pip install --system quic-portal==0.1.8")
 )
 
 volume = modal.Volume.from_name("openpi-cache", create_if_missing=True)
@@ -161,9 +161,9 @@ def client():
 
     print(f"Total time taken: {end - start:.2f} s")
     print(f"Average inference time: {1000 * (end - start) / n_steps:.2f} ms")
-    print(f"p50 inference time: {np.percentile(client_times, 90) * 1000:.2f} ms")
+    print(f"p50 inference time: {np.percentile(client_times, 50) * 1000:.2f} ms")
     print(f"p90 inference time: {np.percentile(client_times, 90) * 1000:.2f} ms")
-    print(f"p95 inference time: {np.percentile(client_times, 90) * 1000:.2f} ms")
+    print(f"p95 inference time: {np.percentile(client_times, 95) * 1000:.2f} ms")
     print(f"p99 inference time: {np.percentile(client_times, 99) * 1000:.2f} ms")
 
     # Shut down the server.
